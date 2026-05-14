@@ -2,9 +2,9 @@ FROM apify/actor-node:24 AS builder
 
 RUN corepack enable && corepack prepare pnpm@11.0.8 --activate
 
-# pnpm-lock.yaml to speed up the build using
+# package.json and pnpm-lock.yaml to speed up the build using
 # Docker layer cache.
-COPY pnpm-lock.yaml* ./
+COPY package.json pnpm-lock.yaml* ./
 
 # Install all dependencies including dev.
 RUN pnpm install --frozen-lockfile
