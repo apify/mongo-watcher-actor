@@ -35,5 +35,10 @@
         "typescript": "6.0.3"
     },
     "author": "It's not you it's me",
-    "license": "ISC"
+    "license": "ISC",
+    "pnpm": {
+        "onlyBuiltDependencies": [
+            "esbuild"
+        ]
+    }
 }
