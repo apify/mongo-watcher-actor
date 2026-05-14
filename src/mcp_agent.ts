@@ -1,4 +1,3 @@
-// mcpAgent.ts
 import type OpenAI from 'openai';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { log } from 'apify';
@@ -38,10 +37,11 @@ async function buildToolRegistry(clients?: McpClients, allow?: ToolAllowlist) {
 
         for (const t of filtered) {
             const fqName = `${namespace}${NS_SEP}${t.name}`;
+            const title = typeof t.annotations?.title === 'string' ? t.annotations.title : '';
             tools.push({
                 type: 'function',
                 name: fqName,
-                description: t.description ?? (t.annotations?.title as string) ?? '',
+                description: t.description ?? title,
                 parameters: (t.inputSchema as Record<string, unknown>) ?? {
                     type: 'object',
                     properties: {},
@@ -69,6 +69,7 @@ export type AgentAttachment = { name: string; text: string };
 export async function runMcpAgent(opts: {
     openai: OpenAI;
     model: string;
+    // Passed through to the SDK; kept loose so OpenRouter-only fields (`enabled`, `xhigh`) survive type checking.
     reasoning?: Record<string, unknown>;
     prompt: string;
     attachments?: AgentAttachment[];

@@ -1,8 +1,7 @@
-import dayjs from 'dayjs'
+import { EXCLUDED_EVENTS_NOTE, INDEX_PROVENANCE_NOTE, runWindow } from './run_context.js';
 
 export function analysisUserPrompt(timePeriodHours: number): string {
-    const to = dayjs().format();
-    const from = dayjs().subtract(timePeriodHours, 'hours').format();
+    const { from, to } = runWindow(timePeriodHours);
     return `Please analyse the attached MongoDB slow query log analysis and produce the two
 reports described in your instructions.
 
@@ -18,9 +17,7 @@ Wrap each file in <file name="..."></file> tags using its filename in the
 that the output can be parsed programmatically. Emit nothing outside the
 <file></file> blocks.
 
-For each finding, explicitly state whether the recommended index already exists
-in indexes.json, partially exists (noting what is missing), or is new.
+${INDEX_PROVENANCE_NOTE}
 
-Do not include mongot entries, _shardsvrMoveRange entries, or
-_migrateClone entries in the analysis — these are known infrastructure events.`;
+${EXCLUDED_EVENTS_NOTE}`;
 }

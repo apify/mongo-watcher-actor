@@ -1,4 +1,4 @@
-import { runInThisContext } from 'vm';
+import { runInThisContext } from 'node:vm';
 
 export function evalFunctionOrThrow(funcString: string): (parsedLine: Record<string, unknown>) => Record<string, unknown> {
     let func;
@@ -7,7 +7,7 @@ export function evalFunctionOrThrow(funcString: string): (parsedLine: Record<str
         func = runInThisContext(`(${funcString})`);
     } catch (err) {
         const e = err as Error;
-        throw new Error(`Compilation of filterFunction failed.\n${e.message}\n${e.stack!.substr(e.stack!.indexOf('\n'))}`);
+        throw new Error(`Compilation of filterFunction failed.\n${e.message}\n${e.stack!.slice(e.stack!.indexOf('\n'))}`);
     }
 
     if (typeof func !== 'function') {

@@ -23,13 +23,11 @@
         "@modelcontextprotocol/sdk": "1.29.0",
         "apify": "3.7.2",
         "dayjs": "1.11.20",
-        "lodash": "4.18.1",
         "openai": "6.37.0"
     },
     "devDependencies": {
         "@apify/oxlint-config": "^0.2.9",
         "@apify/tsconfig": "^0.1.2",
-        "@types/lodash": "4.17.24",
         "oxfmt": "0.48.0",
         "oxlint": "1.63.0",
         "oxlint-tsgolint": "0.22.1",

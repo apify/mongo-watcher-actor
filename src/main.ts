@@ -1,4 +1,6 @@
-import { Actor, log} from 'apify';
+import { rm } from 'node:fs/promises';
+
+import { Actor, log } from 'apify';
 import OpenAI from 'openai';
 
 import { analyzeFile } from './analyze.js';
@@ -10,16 +12,14 @@ import { analysisSystemPrompt, analysisUserPrompt, integrationSystemPrompt, inte
 
 await Actor.init();
 
-const API_TOKEN = process.env.APIFY_TOKEN as string;
-if (!API_TOKEN) throw new Error('Missing APIFY_TOKEN env variable');
-
-const MCP_PROXY_URL = process.env.APIFY_MCP_PROXY_URL;
-if (!MCP_PROXY_URL) throw new Error('Missing APIFY_MCP_PROXY_URL env variable');
+const { APIFY_TOKEN, APIFY_MCP_PROXY_URL } = process.env;
+if (!APIFY_TOKEN) throw new Error('Missing APIFY_TOKEN env variable');
+if (!APIFY_MCP_PROXY_URL) throw new Error('Missing APIFY_MCP_PROXY_URL env variable');
 
 const openai = new OpenAI({
     baseURL: 'https://openrouter.apify.actor/api/v1',
     apiKey: 'no-key-required-but-must-not-be-empty',
-    defaultHeaders: { Authorization: `Bearer ${API_TOKEN}` },
+    defaultHeaders: { Authorization: `Bearer ${APIFY_TOKEN}` },
 });
 
 type InputType = {
@@ -38,39 +38,44 @@ type InputType = {
 };
 
 const input = await Actor.getInput() as InputType;
-
-console.log(JSON.stringify(input, null, 4));
-
 const { nodes, time_period, filter_function, indexes, ...env } = input;
+
+log.info('Input received', {
+    nodes,
+    time_period,
+    notionDatabaseId: input.notionDatabaseId,
+    githubRepository: input.githubRepository,
+    indexCount: indexes.length,
+});
 
 const evaluatedFilterFunction = evalFunctionOrThrow(filter_function);
 
+await rm('./lines.jsonl', { force: true });
 for (const node of nodes) {
     await downloadLogFiles(node, time_period, env, evaluatedFilterFunction);
 }
 
-console.log('Analyzing downloaded logs');
+log.info('Analyzing downloaded logs');
 const analysis = await analyzeFile('./lines.jsonl');
-await Actor.setValue('analysis.txt', analysis, { contentType: 'text/plain'});
-console.log('Done');
+await Actor.setValue('analysis.txt', analysis, { contentType: 'text/plain' });
+
+const indexesJson = JSON.stringify(indexes);
 
 const { text: analysisResponse } = await runMcpAgent({
     openai,
     model: 'anthropic/claude-opus-4.7',
-    reasoning: { enabled: true, effort: "xhigh" },
+    reasoning: { enabled: true, effort: 'xhigh' },
     system: analysisSystemPrompt(),
     prompt: analysisUserPrompt(time_period),
     attachments: [
         { name: 'analysis.txt', text: analysis },
-        { name: 'indexes.json', text: JSON.stringify(indexes, null, 2) },
+        { name: 'indexes.json', text: indexesJson },
     ],
 });
 
 await Actor.setValue('analysis_response.txt', analysisResponse, { contentType: 'text/plain' });
 
-// Extract <file name="..."></file> blocks from the analysis response. The
-// analysis prompt instructs the model to wrap each output file in such tags,
-// so this is the contract.
+// Contract with the analysis prompt: each output file is wrapped in <file name="...">…</file>.
 const fileBlockRegex = /<file\s+name="([^"]+)">([\s\S]*?)<\/file>/g;
 const analysisFiles: { name: string; text: string }[] = [];
 for (const match of analysisResponse.matchAll(fileBlockRegex)) {
@@ -86,36 +91,38 @@ for (const file of analysisFiles) {
     await Actor.setValue(file.name, file.text, { contentType });
 }
 
-const notionMcp = await createMcpClient(MCP_PROXY_URL, input.notionMcpConnector, API_TOKEN);
-const githubMcp = await createMcpClient(MCP_PROXY_URL, input.githubMcpConnector, API_TOKEN);
+const [notionMcp, githubMcp] = await Promise.all([
+    createMcpClient(APIFY_MCP_PROXY_URL, input.notionMcpConnector, APIFY_TOKEN),
+    createMcpClient(APIFY_MCP_PROXY_URL, input.githubMcpConnector, APIFY_TOKEN),
+]);
 
-const { text: integrationResponse } = await runMcpAgent({
-    openai,
-    model: 'anthropic/claude-sonnet-4.6',
-    system: integrationSystemPrompt(input.notionDatabaseId, input.githubRepository),
-    prompt: integrationUserPrompt(time_period),
-    attachments: [
-        ...analysisFiles,
-        { name: 'indexes.json', text: JSON.stringify(indexes, null, 2) },
-    ],
-    clients: { notion: notionMcp, github: githubMcp },
-    allowedTools: {
-        notion: [
-            'notion-fetch',         // read database + read pages
-            'notion-create-pages',  // write into database (pass database_id as parent)
-            'notion-update-page',   // update existing pages
+try {
+    const { text: integrationResponse } = await runMcpAgent({
+        openai,
+        model: 'anthropic/claude-sonnet-4.6',
+        system: integrationSystemPrompt(input.notionDatabaseId, input.githubRepository),
+        prompt: integrationUserPrompt(time_period),
+        attachments: [
+            ...analysisFiles,
+            { name: 'indexes.json', text: indexesJson },
         ],
-        github: [
-            'issue_write',         // create issue in github
-        ],
-    },
-});
+        clients: { notion: notionMcp, github: githubMcp },
+        allowedTools: {
+            notion: [
+                'notion-fetch',
+                'notion-create-pages',
+                'notion-update-page',
+            ],
+            github: [
+                'issue_write',
+            ],
+        },
+    });
 
-await Actor.setValue('integration_response.txt', integrationResponse, { contentType: 'text/plain' });
-
-log.info(integrationResponse);
-
-await notionMcp.close();
-await githubMcp.close();
+    await Actor.setValue('integration_response.txt', integrationResponse, { contentType: 'text/plain' });
+    log.info(integrationResponse);
+} finally {
+    await Promise.all([notionMcp.close(), githubMcp.close()]);
+}
 
 await Actor.exit();

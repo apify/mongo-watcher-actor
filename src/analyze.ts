@@ -1,9 +1,5 @@
-// MongoDB Slow Query Log Analyzer (single-file)
-// Exports analyzeFile(filepath) which processes one log file and returns
-// the formatted analysis output as a string.
-
-import * as fs from 'fs';
-import * as readline from 'readline';
+import * as fs from 'node:fs';
+import * as readline from 'node:readline';
 
 const COMMAND_KEYS = ['find', 'update', 'insert', 'delete', 'aggregate', 'getMore',
                       'findAndModify', 'count', 'distinct', 'bulkWrite'] as const;
@@ -317,7 +313,6 @@ function toJsonRecord(r: RankedGroup, rank: number): Record<string, unknown> {
 
 function padL(s: string | number, w: number): string { return String(s).padStart(w); }
 function padR(s: string | number, w: number): string { return String(s).padEnd(w); }
-function rep(c: string, n: number): string { return c.repeat(n); }
 
 function jsonDumps(v: unknown): string {
   return JSON.stringify(v, (_k, val) => {
@@ -449,7 +444,7 @@ export async function analyzeFile(filepath: string, opts: AnalyzeOptions = {}): 
   const topRanked = filteredRanked.slice(0, top);
 
   const out: string[] = [];
-  const eq = rep('=', 100);
+  const eq = '='.repeat(100);
 
   out.push(eq);
   out.push('MONGODB SLOW QUERY LOG ANALYSIS');

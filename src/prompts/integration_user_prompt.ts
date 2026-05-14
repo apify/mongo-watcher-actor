@@ -1,8 +1,7 @@
-import dayjs from 'dayjs'
+import { EXCLUDED_EVENTS_NOTE, INDEX_PROVENANCE_NOTE, runWindow } from './run_context.js';
 
 export function integrationUserPrompt(timePeriodHours: number): string {
-    const to = dayjs().format();
-    const from = dayjs().subtract(timePeriodHours, 'hours').format();
+    const { from, to } = runWindow(timePeriodHours);
     return `Please process the attached MongoDB slow query analysis reports and produce
 the integration outputs described in your instructions (Notion entries + GitHub issues).
 
@@ -11,9 +10,7 @@ Context for this specific run:
 - Attached files: the analysis agent's output (one or more .md reports) and the
   indexes dump (indexes.json) used as ground truth.
 
-For each finding, explicitly state whether the recommended index already exists
-in indexes.json, partially exists (noting what is missing), or is new.
+${INDEX_PROVENANCE_NOTE}
 
-Do not include mongot entries, _shardsvrMoveRange entries, or
-_migrateClone entries — these are known infrastructure events.`;
+${EXCLUDED_EVENTS_NOTE}`;
 }
