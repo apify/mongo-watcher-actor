@@ -1,0 +1,13 @@
+{
+    "actorSpecification": 1,
+    "name": "apify-mongo-watcher",
+    "title": "MongoDB Atlas Watcher",
+    "description": "Imports logs from MongoDB Atlas and produces a report with recommendations on how to optimize the database. Stores the report in Notion and adds new issues to GitHub",
+    "version": "0.0",
+    "buildTag": "latest",
+    "meta": {
+        "templateId": "ts-empty"
+    },
+    "dockerfile": "./Dockerfile",
+    "input": "./input_schema.json"
+}

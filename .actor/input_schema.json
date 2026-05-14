@@ -1,0 +1,97 @@
+{
+    "title": "MongoDB Atlas Watcher",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "organization_id": {
+            "type": "string",
+            "title": "ID of the organization",
+            "description": "This can be found by clicking on your account and going to 'organizations'",
+            "editor": "textfield"
+        },
+        "project_id": {
+            "type": "string",
+            "title": "ID of the project",
+            "description": "This can be found right after you select your organization",
+            "editor": "textfield"
+        },
+        "public_key": {
+            "type": "string",
+            "title": "Public key",
+            "description": "Given to you when you create a new key in organization settings",
+            "editor": "textfield",
+            "isSecret": true
+        },
+        "private_key": {
+            "type": "string",
+            "title": "Private key",
+            "description": "Given to you when you create a new key in organization settings",
+            "editor": "textfield",
+            "isSecret": true
+        },
+        "nodes": {
+            "type": "array",
+            "title": "Nodes",
+            "description": "List of nodes to download logs from",
+            "editor": "stringList",
+            "minItems": 1,
+            "uniqueItems": true
+        },
+        "time_period": {
+            "type": "integer",
+            "title": "Hours",
+            "description": "How many hours of logs do you want to download?",
+            "editor": "number",
+            "minimum": 1,
+            "prefill": 1,
+            "default": 1,
+            "unit": "hours"
+        },
+        "filter_function": {
+            "title": "Filter function",
+            "type": "string",
+            "description": "A JavaScript function that is executed on each log line.",
+            "prefill": "async function filterFunction(line: uknown) {\n    return line;\n}",
+            "editor": "javascript"
+        },
+        "indexes": {
+            "title": "Indexes",
+            "type": "array",
+            "description": "Array of MongoDB index definitions, attached to the analysis agent so it can tell whether a recommended index already exists.",
+            "editor": "json",
+            "default": []
+        },
+        "notionMcpConnector": {
+            "title": "Notion MCP Connector",
+            "description": "Connector to a Notion MCP Server. If set together with Notion Page ID, result of the analysis will be merged with Notion database",
+            "type": "string",
+            "resourceType": "mcpConnector",
+            "mcpServers": [
+                { "url": "*notion*" }
+            ],
+            "section": "Integration with Notion / Github / Slack"
+        },
+        "notionPageId": {
+            "title": "Notion Page ID",
+            "description": "The ID of the Notion page where database with analysis results lives.",
+            "type": "string",
+            "editor": "textfield"
+        },
+        "slackMcpConnector": {
+            "title": "Slack MCP Connector",
+            "description": "Connector to a Slack MCP Server. If set together with Slack Channel ID, new items in database will be posted to a Slack channel",
+            "type": "string",
+            "resourceType": "mcpConnector",
+            "mcpServers": [
+                { "url": "*slack*" }
+            ]
+        },
+        "slackChannelId": {
+            "title": "Slack Channel ID",
+            "description": "The ID of the Slack channel where new items in the database will be posted.",
+            "type": "string",
+            "editor": "textfield"
+        }
+    },
+    "required": ["organization_id", "project_id", "public_key", "private_key", "nodes", "indexes", "notionMcpConnector", "notionPageId", "slackMcpConnector", "slackChannelId"]
+}

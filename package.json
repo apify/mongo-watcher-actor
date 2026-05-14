@@ -1,0 +1,41 @@
+{
+    "name": "apify-mongo-watcher",
+    "version": "0.0.1",
+        "type": "module",
+        "description": "Imports logs from MongoDB Atlas and produces a report with recommendations on how to optimize the database. Stores the report in Notion and adds new issues to GitHub",
+    "engines": {
+        "node": ">=24.0.0"
+    },
+    "packageManager": "pnpm@11.0.8",
+    "scripts": {
+        "preinstall": "npx only-allow pnpm",
+        "start": "pnpm run start:dev",
+        "start:prod": "node dist/main.js",
+        "start:dev": "tsx src/main.ts",
+        "build": "tsc",
+        "lint": "oxlint --type-aware .",
+        "lint:fix": "oxlint --type-aware --fix .",
+        "format": "oxfmt",
+        "format:check": "oxfmt --check",
+        "test": "echo \"Error: oops, the actor has no tests yet, sad!\" && exit 1"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "1.29.0",
+        "apify": "3.7.2",
+        "dayjs": "1.11.20",
+        "lodash": "4.18.1",
+        "openai": "6.37.0"
+    },
+    "devDependencies": {
+        "@apify/oxlint-config": "^0.2.9",
+        "@apify/tsconfig": "^0.1.2",
+        "@types/lodash": "4.17.24",
+        "oxfmt": "0.48.0",
+        "oxlint": "1.63.0",
+        "oxlint-tsgolint": "0.22.1",
+        "tsx": "4.21.0",
+        "typescript": "6.0.3"
+    },
+    "author": "It's not you it's me",
+    "license": "ISC"
+}
