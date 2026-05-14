@@ -1,6 +1,6 @@
 FROM apify/actor-node:24 AS builder
 
-RUN corepack enable && corepack prepare pnpm@11.0.8 --activate
+RUN corepack enable && corepack prepare pnpm@11.1.2 --activate
 
 # package.json and pnpm-lock.yaml to speed up the build using
 # Docker layer cache.
@@ -19,7 +19,7 @@ RUN pnpm run build
 FROM apify/actor-node:24
 
 # Enable pnpm via corepack.
-RUN corepack enable && corepack prepare pnpm@11.0.8 --activate
+RUN corepack enable && corepack prepare pnpm@11.1.2 --activate
 
 # Copy just package.json and pnpm-lock.yaml to speed up the build using
 # Docker layer cache.
