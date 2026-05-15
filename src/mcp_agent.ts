@@ -36,6 +36,7 @@ async function buildToolRegistry(clients?: McpClients, allow?: ToolAllowlist) {
         }
 
         log.info(`MCP server '${namespace}': ${mcpTools.length} tools available, ${filtered.length} exposed to agent`);
+        log.info(`MCP server '${namespace}' tool names: ${mcpTools.map((t) => t.name).join(', ')}`);
 
         for (const t of filtered) {
             const fqName = `${namespace}${NS_SEP}${t.name}`;

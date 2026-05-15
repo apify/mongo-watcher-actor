@@ -1,167 +1,73 @@
-import type OpenAI from 'openai';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { log } from 'apify';
 
-import { runMcpAgent } from './mcp_agent.js';
-
 export type NotionEntry = {
-    page_id: string;
-    page_url: string;
+    id: string;
     title: string;
     collection: string;
     query_hashes: string[];
-    status: string;
-    priority: string;
+    status: 'New' | 'Ongoing' | 'Solved' | '';
+    priority: 'P0' | 'P1' | 'P2' | 'P3' | '';
     action_type: string;
-    last_seen: string;
     first_seen: string;
+    last_seen: string;
     github_issue: string;
+    body: string;
 };
 
 export type NotionSnapshot = {
-    data_source_id: string;
+    page_id: string;
     entries: NotionEntry[];
 };
 
-const FETCH_TOOL_NAME = 'notion-fetch';
-const SEARCH_TOOL_NAME = 'notion-search';
-const ALLOWED_TOOLS = [FETCH_TOOL_NAME, SEARCH_TOOL_NAME];
-const MAX_STEPS = 30;
-const TOOL_TIMEOUT_MS = 2 * 60 * 1000;
+export const FINDINGS_STATE_VERSION = 1;
 
-function buildSystemPrompt(databaseId: string): string {
-    return `You are a deterministic data-extraction step. Your only job is to enumerate
-every row of a Notion database and emit it as JSON. You produce no analysis,
-no commentary, no markdown.
+const FETCH_TIMEOUT_MS = 60 * 1000;
 
-Database to fetch: \`${databaseId}\`.
+// Matches the first ```json fenced block on the page. The actor maintains this
+// block as the source of truth and rewrites the whole page on every run, so
+// "first json block" is unambiguous.
+const STATE_BLOCK_RE = /```json\s*\n([\s\S]*?)\n```/;
 
-Tools you may call (and ONLY these tools):
-  • ${FETCH_TOOL_NAME} — fetch a Notion URL or ID (database, data source, or page).
-  • ${SEARCH_TOOL_NAME} — list/search entries inside a Notion data source. Use this
-    to enumerate rows once you know the data source UUID. Supports pagination
-    via a cursor in the response.
-
-Procedure:
-  1. Call ${FETCH_TOOL_NAME} with the database ID. The response contains a
-     \`<data-source url="collection://<uuid>">\` tag near the top describing
-     the data source backing this database.
-  2. Capture the data source UUID from that tag (everything after
-     \`collection://\`).
-  3. Call ${SEARCH_TOOL_NAME} scoped to that data source UUID to list its
-     entries. If the response includes a continuation cursor (e.g.
-     \`next_cursor\`, \`has_more\`, or a "load more" reference), call
-     ${SEARCH_TOOL_NAME} again with the cursor until every entry has been
-     listed.
-  4. For any entry whose property values are not fully visible in the search
-     results, call ${FETCH_TOOL_NAME} on that page's ID/URL to read the
-     missing fields.
-  5. For each entry, extract: page id, page URL, title, Collection,
-     Query Hashes (multi-select — emit ALL hashes), Status, Priority,
-     Action Type, First Seen, Last Seen, GitHub Issue.
-  6. When fully enumerated, output a SINGLE JSON object and nothing else.
-
-Output schema (strict — emit exactly this shape, no extra keys, no prose):
-
-{
-  "data_source_id": "<uuid>",
-  "entries": [
-    {
-      "page_id": "<notion page id>",
-      "page_url": "<full https URL of the page>",
-      "title": "<Issue Name>",
-      "collection": "<Collection select value or empty string>",
-      "query_hashes": ["<HEX>", "<HEX>", ...],
-      "status": "<New|Ongoing|Solved or empty>",
-      "priority": "<P0|P1|P2|P3 or empty>",
-      "action_type": "<Action Type select value or empty>",
-      "last_seen": "<ISO date or empty>",
-      "first_seen": "<ISO date or empty>",
-      "github_issue": "<URL or empty>"
-    }
-  ]
-}
-
-Rules:
-  • If a property is missing or empty in Notion, use "" (empty string) — not
-    null, not "N/A".
-  • query_hashes is always an array; use [] when there are no hashes.
-  • Do NOT fabricate entries. Only emit rows that exist in the database.
-  • Do NOT call any tool other than ${FETCH_TOOL_NAME} and ${SEARCH_TOOL_NAME}.
-  • Once you have enumerated every entry, your final assistant message must
-    be exactly one JSON object that matches the schema above — no fences,
-    no extra text before or after.`;
+function mcpResultToText(result: Awaited<ReturnType<Client['callTool']>>): string {
+    const content = result.content as { type: string; text?: string }[] | undefined;
+    if (!content) return '';
+    return content
+        .filter((c) => c.type === 'text' && typeof c.text === 'string')
+        .map((c) => c.text)
+        .join('\n');
 }
 
 export async function fetchNotionEntries(opts: {
-    openai: OpenAI;
     notionMcp: Client;
-    databaseId: string;
-    model?: string;
+    pageId: string;
 }): Promise<NotionSnapshot> {
-    const { openai, notionMcp, databaseId, model = 'anthropic/claude-haiku-4.5' } = opts;
+    const { notionMcp, pageId } = opts;
 
-    const { text } = await runMcpAgent({
-        openai,
-        model,
-        maxSteps: MAX_STEPS,
-        toolTimeoutMs: TOOL_TIMEOUT_MS,
-        clients: { notion: notionMcp },
-        allowedTools: { notion: ALLOWED_TOOLS },
-        system: buildSystemPrompt(databaseId),
-        prompt: `Enumerate every row of database \`${databaseId}\` and emit the JSON object described in your instructions.`,
-    });
+    const result = await notionMcp.callTool(
+        { name: 'notion-fetch', arguments: { id: pageId } },
+        undefined,
+        { timeout: FETCH_TIMEOUT_MS },
+    );
+    const text = mcpResultToText(result);
 
-    const parsed = parseSnapshot(text);
-    log.info(`Notion bootstrap: parsed ${parsed.entries.length} entries, data_source_id=${parsed.data_source_id}`);
-    return parsed;
-}
-
-function extractJsonObject(text: string): string {
-    // The model sometimes wraps JSON in a ```json fence or adds a prose prefix
-    // despite the prompt forbidding it. Pull out the first balanced {...} block.
-    const trimmed = text.trim();
-    let candidate = trimmed;
-    if (trimmed.startsWith('```')) {
-        const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-        if (fenceMatch) candidate = fenceMatch[1].trim();
+    const match = text.match(STATE_BLOCK_RE);
+    if (!match) {
+        log.info('Notion bootstrap: no findings JSON block on page — starting from empty state');
+        return { page_id: pageId, entries: [] };
     }
-
-    const start = candidate.indexOf('{');
-    if (start === -1) return candidate;
-
-    let depth = 0;
-    let inString = false;
-    let escape = false;
-    for (let i = start; i < candidate.length; i++) {
-        const ch = candidate[i];
-        if (escape) { escape = false; continue; }
-        if (ch === '\\' && inString) { escape = true; continue; }
-        if (ch === '"') { inString = !inString; continue; }
-        if (inString) continue;
-        if (ch === '{') depth++;
-        else if (ch === '}') {
-            depth--;
-            if (depth === 0) return candidate.slice(start, i + 1);
-        }
-    }
-    return candidate.slice(start);
-}
-
-function parseSnapshot(text: string): NotionSnapshot {
-    const stripped = extractJsonObject(text);
 
     let raw: unknown;
     try {
-        raw = JSON.parse(stripped);
+        raw = JSON.parse(match[1]);
     } catch (e) {
-        throw new Error(`Notion bootstrap: final output was not valid JSON — ${(e as Error).message}\n--- output ---\n${stripped.slice(0, 1000)}`);
+        throw new Error(`Notion bootstrap: findings JSON block is not valid JSON — ${(e as Error).message}`);
     }
 
-    if (!raw || typeof raw !== 'object') throw new Error('Notion bootstrap: top-level JSON is not an object');
+    if (!raw || typeof raw !== 'object') {
+        throw new Error('Notion bootstrap: findings JSON top-level is not an object');
+    }
     const obj = raw as Record<string, unknown>;
-    const dsId = typeof obj.data_source_id === 'string' ? obj.data_source_id : '';
-    if (!dsId) throw new Error('Notion bootstrap: missing data_source_id');
     const rawEntries = Array.isArray(obj.entries) ? obj.entries : [];
 
     const entries: NotionEntry[] = rawEntries.map((row, i) => {
@@ -174,19 +80,76 @@ function parseSnapshot(text: string): NotionSnapshot {
             ? r.query_hashes.filter((h): h is string => typeof h === 'string')
             : [];
         return {
-            page_id: str(r.page_id),
-            page_url: str(r.page_url),
+            id: str(r.id),
             title: str(r.title),
             collection: str(r.collection),
             query_hashes: hashes,
-            status: str(r.status),
-            priority: str(r.priority),
+            status: str(r.status) as NotionEntry['status'],
+            priority: str(r.priority) as NotionEntry['priority'],
             action_type: str(r.action_type),
-            last_seen: str(r.last_seen),
             first_seen: str(r.first_seen),
+            last_seen: str(r.last_seen),
             github_issue: str(r.github_issue),
+            body: str(r.body),
         };
     });
 
-    return { data_source_id: dsId, entries };
+    log.info(`Notion bootstrap: parsed ${entries.length} entries from page ${pageId}`);
+    return { page_id: pageId, entries };
+}
+
+/** Render the canonical Notion page that holds the findings state.
+ *  The first ```json block is the source of truth; everything else is a
+ *  human-readable summary regenerated from it. */
+export function renderFindingsPage(opts: {
+    snapshot: NotionSnapshot;
+    runId?: string;
+}): string {
+    const { snapshot, runId } = opts;
+    const stamp = new Date().toISOString();
+
+    const stateJson = JSON.stringify(
+        { version: FINDINGS_STATE_VERSION, entries: snapshot.entries },
+        null,
+        2,
+    );
+
+    const priorityOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, '': 4 };
+    const sorted = [...snapshot.entries].sort((a, b) => {
+        const pa = priorityOrder[a.priority] ?? 4;
+        const pb = priorityOrder[b.priority] ?? 4;
+        if (pa !== pb) return pa - pb;
+        return a.title.localeCompare(b.title);
+    });
+
+    const renderedFindings = sorted
+        .map((e) => {
+            const priority = e.priority || '—';
+            const status = e.status || '—';
+            const issueLink = e.github_issue ? ` · [GitHub issue](${e.github_issue})` : '';
+            const seen = (e.first_seen || e.last_seen)
+                ? `_First seen ${e.first_seen || '?'}, last seen ${e.last_seen || '?'}._${issueLink}\n\n`
+                : '';
+            return `### ${priority} · ${e.title} · ${status}\n\n${seen}${e.body}\n`;
+        })
+        .join('\n---\n\n');
+
+    const runLine = runId ? ` (Apify run \`${runId}\`)` : '';
+
+    return `# Slow Query Findings
+
+_Last updated: ${stamp}${runLine}_
+
+## State
+
+The fenced \`json\` block below is the machine-readable source of truth. **Do not edit by hand** — the actor rewrites this page on every run.
+
+\`\`\`json
+${stateJson}
+\`\`\`
+
+## Findings
+
+${renderedFindings || '_No findings yet._'}
+`;
 }

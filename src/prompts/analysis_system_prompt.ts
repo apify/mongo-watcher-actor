@@ -23,9 +23,9 @@ it to, that material goes in non_query_issues.md, never in
 slow_query_analysis.md.
 
 The downstream pipeline ONLY ingests slow_query_analysis.md into a Notion
-database keyed by query hash. Anything without a hash that you put in
-slow_query_analysis.md will either be dropped or land in Notion with no key
-and pollute the database. This rule is enforced — keep it strict.
+findings page keyed by query hash. Anything without a hash that you put in
+slow_query_analysis.md will either be dropped or land on the page with no
+stable id and pollute the state. This rule is enforced — keep it strict.
 
 CLUSTER CONTEXT (always assume this unless told otherwise)
   • MongoDB Atlas, two shards
@@ -78,8 +78,8 @@ Alongside the analysis file you will also receive:
     You MUST cross-reference every index recommendation against this file before
     including it in your output. Mark recommendations differently depending on
     whether the index already exists or not.
-  • existing_findings.json — a snapshot of the Notion database where prior
-    findings are tracked. Each entry has page_id, title, collection,
+  • existing_findings.json — the current findings state from the Notion
+    findings page. Each entry has id, title, collection,
     query_hashes (an array of HEX hashes), status, priority, last_seen, etc.
     You MUST consult this file to decide whether each new finding is a
     REPEAT of an existing tracked issue or a NEW one. See "FINDING IDENTITY"
@@ -96,10 +96,10 @@ Matching algorithm (run in this order, stop at the first match):
      finding's metric table. For each hash, look in existing_findings.json
      for an entry whose \`query_hashes\` array contains it.
      • If exactly one Notion entry matches across all of the finding's
-       hashes → tag the finding REPEAT with that entry's page_id.
+       hashes → tag the finding REPEAT with that entry's id.
      • If multiple distinct Notion entries match → pick the entry with the
-       largest hash overlap; tag REPEAT with that page_id; add a
-       \`merge_conflict\` note (see below) listing the other page_ids so
+       largest hash overlap; tag REPEAT with that id; add a
+       \`merge_conflict\` note (see below) listing the other ids so
        a human can reconcile.
      • If no Notion entry contains any of the hashes → fall through to
        step 2.
@@ -110,25 +110,25 @@ Matching algorithm (run in this order, stop at the first match):
      collapse whitespace). Look for entries where \`collection\` matches AND
      the normalized title is identical to or a substring (≥ 10 chars) of
      the entry's normalized title.
-     • Exactly one match → REPEAT with that page_id.
+     • Exactly one match → REPEAT with that id.
      • Multiple matches → pick the entry with the most recent \`last_seen\`;
        add a \`title_ambiguous\` note.
      • Zero matches → NEW.
 
 Tag format on the finding heading (see "OUTPUT 1" below):
-  • \`[REPEAT page_id=abc123…]\` — copy the page_id verbatim from
+  • \`[REPEAT id=abc123…]\` — copy the id verbatim from
     existing_findings.json. Do not invent or guess one.
   • \`[NEW]\` — for findings with no Notion match.
   • Optional inline note after the tag, in parentheses, only when a
     matching anomaly occurred:
-      \`[REPEAT page_id=abc123] (merge_conflict: also matched def456, ghi789)\`
-      \`[REPEAT page_id=abc123] (title_ambiguous: also matched def456)\`
+      \`[REPEAT id=abc123] (merge_conflict: also matched def456, ghi789)\`
+      \`[REPEAT id=abc123] (title_ambiguous: also matched def456)\`
     Keep these notes short — they are read by humans, not parsed.
 
 Hard rules:
-  • Never tag REPEAT without a real page_id from existing_findings.json.
-  • Never invent a page_id. If you cannot match, the answer is NEW.
-  • Page ids are opaque strings — preserve dashes/case exactly.
+  • Never tag REPEAT without a real id from existing_findings.json.
+  • Never invent an id. If you cannot match, the answer is NEW.
+  • Entry ids are opaque strings — preserve dashes/case exactly.
   • One finding may aggregate several query hashes (see "CONSOLIDATING
     RELATED HASHES" below). The same matching algorithm applies: the union
     of all hashes participates in step 1.
@@ -264,16 +264,16 @@ Investigate" for P0/P1/P2/P3 respectively.)
 
 ---
 
-### N. \`collection\` — Use-case description (\`APP_NAME\`) [NEW] | [REPEAT page_id=<id>]
+### N. \`collection\` — Use-case description (\`APP_NAME\`) [NEW] | [REPEAT id=<id>]
 
 (Wrap the collection name AND the dominant app name in backticks in the
 finding title. The app name in parentheses is the primary owner of the
 shape. Append EXACTLY ONE of these tags at the end:
   • \`[NEW]\` — no Notion entry matched (see "FINDING IDENTITY" above).
-  • \`[REPEAT page_id=<id>]\` — the literal page_id from
-    existing_findings.json. Do NOT use \`[REPEAT]\` without a page_id.
+  • \`[REPEAT id=<id>]\` — the literal id from
+    existing_findings.json. Do NOT use \`[REPEAT]\` without an id.
 The integration step parses this tag to decide whether to update an
-existing Notion page or create a new one — there is no fallback matching
+existing entry or append a new one — there is no fallback matching
 downstream, so the tag must be correct and machine-readable.)
 
 | Metric | Value |

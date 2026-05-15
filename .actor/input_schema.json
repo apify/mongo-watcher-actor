@@ -62,16 +62,16 @@
         },
         "notionMcpConnector": {
             "title": "Notion MCP Connector",
-            "description": "Connector to a Notion MCP Server. If set together with Notion Page ID, result of the analysis will be merged with Notion database",
+            "description": "Connector to a Notion MCP Server. The findings state is stored on a single Notion page identified by Notion Page ID.",
             "type": "string",
             "resourceType": "mcpConnector",
             "mcpServers": [
                 { "url": "*notion*" }
             ]
         },
-        "notionDatabaseId": {
-            "title": "Notion Database ID",
-            "description": "The ID of the Notion database with analysis results.",
+        "notionPageId": {
+            "title": "Notion Page ID",
+            "description": "The ID of the Notion page that holds the findings state. The actor rewrites this page on every run; do not edit it by hand.",
             "type": "string",
             "editor": "textfield"
         },
@@ -91,5 +91,5 @@
             "editor": "textfield"
         }
     },
-    "required": ["organization_id", "project_id", "public_key", "private_key", "nodes", "indexes", "notionMcpConnector", "notionDatabaseId", "githubMcpConnector", "githubRepository"]
+    "required": ["organization_id", "project_id", "public_key", "private_key", "nodes", "indexes", "notionMcpConnector", "notionPageId", "githubMcpConnector", "githubRepository"]
 }
