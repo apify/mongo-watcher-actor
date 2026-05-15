@@ -12,6 +12,19 @@ import { analysisSystemPrompt, analysisUserPrompt, integrationSystemPrompt, inte
 
 await Actor.init();
 
+async function time<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    log.info(`▶ ${label}`);
+    const startedAt = Date.now();
+    try {
+        const result = await fn();
+        log.info(`✓ ${label} (${((Date.now() - startedAt) / 1000).toFixed(1)}s)`);
+        return result;
+    } catch (err) {
+        log.error(`✗ ${label} failed after ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+        throw err;
+    }
+}
+
 const { APIFY_TOKEN, APIFY_MCP_PROXY_URL } = process.env;
 if (!APIFY_TOKEN) throw new Error('Missing APIFY_TOKEN env variable');
 if (!APIFY_MCP_PROXY_URL) throw new Error('Missing APIFY_MCP_PROXY_URL env variable');
@@ -51,17 +64,18 @@ log.info('Input received', {
 const evaluatedFilterFunction = evalFunctionOrThrow(filter_function);
 
 await rm('./lines.jsonl', { force: true });
-for (const node of nodes) {
-    await downloadLogFiles(node, time_period, env, evaluatedFilterFunction);
-}
+await time(`Phase 1/4: download logs from ${nodes.length} node(s)`, async () => {
+    for (const node of nodes) {
+        await downloadLogFiles(node, time_period, env, evaluatedFilterFunction);
+    }
+});
 
-log.info('Analyzing downloaded logs');
-const analysis = await analyzeFile('./lines.jsonl');
+const analysis = await time('Phase 2/4: analyze downloaded logs', async () => analyzeFile('./lines.jsonl'));
 await Actor.setValue('analysis.txt', analysis, { contentType: 'text/plain' });
 
 const indexesJson = JSON.stringify(indexes);
 
-const { text: analysisResponse } = await runMcpAgent({
+const { text: analysisResponse } = await time('Phase 3/4: Claude analysis agent', async () => runMcpAgent({
     openai,
     model: 'anthropic/claude-opus-4.7',
     reasoning: { enabled: true, effort: 'xhigh' },
@@ -71,7 +85,7 @@ const { text: analysisResponse } = await runMcpAgent({
         { name: 'analysis.txt', text: analysis },
         { name: 'indexes.json', text: indexesJson },
     ],
-});
+}));
 
 await Actor.setValue('analysis_response.txt', analysisResponse, { contentType: 'text/plain' });
 
@@ -97,7 +111,7 @@ const [notionMcp, githubMcp] = await Promise.all([
 ]);
 
 try {
-    const { text: integrationResponse } = await runMcpAgent({
+    const { text: integrationResponse } = await time('Phase 4/4: Claude integration agent (Notion + GitHub)', async () => runMcpAgent({
         openai,
         model: 'anthropic/claude-sonnet-4.6',
         system: integrationSystemPrompt(input.notionDatabaseId, input.githubRepository),
@@ -117,10 +131,10 @@ try {
                 'issue_write',
             ],
         },
-    });
+    }));
 
     await Actor.setValue('integration_response.txt', integrationResponse, { contentType: 'text/plain' });
-    log.info(integrationResponse);
+    log.info(`Integration response saved to KV (${integrationResponse.length} chars)`);
 } finally {
     await Promise.all([notionMcp.close(), githubMcp.close()]);
 }

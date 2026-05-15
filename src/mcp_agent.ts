@@ -35,6 +35,8 @@ async function buildToolRegistry(clients?: McpClients, allow?: ToolAllowlist) {
             }
         }
 
+        log.info(`MCP server '${namespace}': ${mcpTools.length} tools available, ${filtered.length} exposed to agent`);
+
         for (const t of filtered) {
             const fqName = `${namespace}${NS_SEP}${t.name}`;
             const title = typeof t.annotations?.title === 'string' ? t.annotations.title : '';
@@ -52,6 +54,25 @@ async function buildToolRegistry(clients?: McpClients, allow?: ToolAllowlist) {
         }
     }
     return { tools, dispatch };
+}
+
+type TokenUsage = {
+    input: number;
+    output: number;
+    reasoning: number;
+    total: number;
+};
+
+function extractUsage(response: OpenAI.Responses.Response): TokenUsage {
+    const u = response.usage as
+        | (OpenAI.Responses.ResponseUsage & { output_tokens_details?: { reasoning_tokens?: number } })
+        | undefined;
+    return {
+        input: u?.input_tokens ?? 0,
+        output: u?.output_tokens ?? 0,
+        reasoning: u?.output_tokens_details?.reasoning_tokens ?? 0,
+        total: u?.total_tokens ?? 0,
+    };
 }
 
 /** Extract plain text from an MCP tool result. */
@@ -83,10 +104,10 @@ export async function runMcpAgent(opts: {
     const { tools, dispatch } = await buildToolRegistry(clients, allowedTools);
 
     const clientCount = Object.keys(clients ?? {}).length;
-    if (tools.length && clientCount) {
-        log.info(`Agent armed with ${tools.length} tools across ${clientCount} MCP servers`);
+    if (tools.length) {
+        log.info(`Agent armed with ${tools.length} tools across ${clientCount} MCP server(s), model=${model}, maxSteps=${maxSteps}`);
     } else {
-        log.info(`Agent will run without any tools`);
+        log.info(`Agent will run without any tools, model=${model}, maxSteps=${maxSteps}`);
     }
 
     const userContent: OpenAI.Responses.ResponseInputContent[] = [{ type: 'input_text', text: prompt }];
@@ -98,7 +119,11 @@ export async function runMcpAgent(opts: {
     }
     const input: ResponseInputItem[] = [{ role: 'user', content: userContent }];
 
+    const totals = { input: 0, output: 0, reasoning: 0, total: 0 };
+    const agentStartedAt = Date.now();
+
     for (let step = 0; step < maxSteps; step++) {
+        const stepStartedAt = Date.now();
         const response = await openai.responses.create({
             model,
             instructions: system,
@@ -107,6 +132,20 @@ export async function runMcpAgent(opts: {
             tool_choice: tools.length ? 'auto' : undefined,
             reasoning: reasoning as OpenAI.Responses.ResponseCreateParams['reasoning'],
         });
+
+        const usage = extractUsage(response);
+        totals.input += usage.input;
+        totals.output += usage.output;
+        totals.reasoning += usage.reasoning;
+        totals.total += usage.total;
+
+        const stepMs = Date.now() - stepStartedAt;
+        log.info(
+            `Agent step ${step + 1}/${maxSteps} done in ${stepMs}ms — tokens: `
+            + `in=${usage.input}, out=${usage.output}`
+            + (usage.reasoning ? `, reasoning=${usage.reasoning}` : '')
+            + `, total=${usage.total}`,
+        );
 
         // Append every output item from this turn back into input so the
         // model sees its own previous output (and tool calls) on the next call.
@@ -119,16 +158,22 @@ export async function runMcpAgent(opts: {
         );
 
         if (functionCalls.length === 0) {
-            // Model produced a final answer
+            const agentMs = Date.now() - agentStartedAt;
+            log.info(
+                `Agent finished after ${step + 1} step(s) in ${(agentMs / 1000).toFixed(1)}s — `
+                + `cumulative tokens: in=${totals.input}, out=${totals.output}`
+                + (totals.reasoning ? `, reasoning=${totals.reasoning}` : '')
+                + `, total=${totals.total}`,
+            );
             return { text: response.output_text ?? '', input };
         }
 
         // Execute every tool call this turn (model may issue several in parallel)
         for (const call of functionCalls) {
             const entry = dispatch.get(call.name);
-            log.info(`Tool call: ${call.name}`);
 
             if (!entry) {
+                log.warning(`Tool call: ${call.name} — unknown tool, returning error to agent`);
                 input.push({
                     type: 'function_call_output',
                     call_id: call.call_id,
@@ -141,6 +186,7 @@ export async function runMcpAgent(opts: {
             try {
                 args = call.arguments ? JSON.parse(call.arguments) : {};
             } catch (e) {
+                log.warning(`Tool call: ${call.name} — failed to parse arguments`, { error: (e as Error).message });
                 input.push({
                     type: 'function_call_output',
                     call_id: call.call_id,
@@ -149,6 +195,8 @@ export async function runMcpAgent(opts: {
                 continue;
             }
 
+            const argKeys = Object.keys(args);
+            const toolStartedAt = Date.now();
             try {
                 const result = await entry.client.callTool(
                     { name: entry.toolName, arguments: args },
@@ -156,12 +204,22 @@ export async function runMcpAgent(opts: {
                     { timeout: toolTimeoutMs },
                 );
                 const text = mcpResultToText(result) || '(empty result)';
+                const toolMs = Date.now() - toolStartedAt;
+                log.info(
+                    `Tool call: ${call.name}(${argKeys.join(', ')}) `
+                    + `→ ${text.length} chars in ${toolMs}ms`,
+                );
                 input.push({
                     type: 'function_call_output',
                     call_id: call.call_id,
                     output: text.slice(0, 200_000), // guard against giant results
                 });
             } catch (e) {
+                const toolMs = Date.now() - toolStartedAt;
+                log.warning(
+                    `Tool call: ${call.name}(${argKeys.join(', ')}) failed after ${toolMs}ms`,
+                    { error: (e as Error).message },
+                );
                 input.push({
                     type: 'function_call_output',
                     call_id: call.call_id,
@@ -171,5 +229,12 @@ export async function runMcpAgent(opts: {
         }
     }
 
+    const agentMs = Date.now() - agentStartedAt;
+    log.warning(
+        `Agent hit maxSteps=${maxSteps} without producing a final answer after ${(agentMs / 1000).toFixed(1)}s — `
+        + `cumulative tokens: in=${totals.input}, out=${totals.output}`
+        + (totals.reasoning ? `, reasoning=${totals.reasoning}` : '')
+        + `, total=${totals.total}`,
+    );
     return { text: 'Max steps reached without a final answer', input };
 }

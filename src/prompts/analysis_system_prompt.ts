@@ -168,12 +168,9 @@ Use this structure (adapt section count to what is found):
 # MongoDB Slow Query Analysis — \`<cluster name or db>\`
 
 **Log window:** <start UTC> – <end UTC> (~24 hours)
-**Sources:** \`0-secondary.slow.log\`, \`1-primary.slow.log\`, \`2-secondary.slow.log\` (or whatever was provided)
 **Total entries analyzed:** <N> (\`mongot\` entries excluded)
 **Unique query groups:** <N>
 **Critical entries (>5 s):** <N>
-
-Issues marked **[REPEAT]** were identified in the previous analysis and remain unresolved. Issues marked **[NEW]** were not identified previously.
 
 (Use two trailing spaces at the end of each preamble line so they render as separate lines, not one paragraph.)
 
