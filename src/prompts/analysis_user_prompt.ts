@@ -9,6 +9,11 @@ Context for this specific run:
 - Window: ${from} → ${to}
 - Analysis file: see attached analysis.txt
 - Indexes file: see attached indexes.json
+- Existing findings (Notion snapshot): see attached existing_findings.json —
+  use it to tag every finding in slow_query_analysis.md as either
+  \`[NEW]\` or \`[REPEAT page_id=<id>]\` per the FINDING IDENTITY rules in
+  your instructions. The downstream integration step trusts these tags
+  verbatim and does no re-matching.
 
 Output both files in full, using the formats specified in your instructions.
 Start with slow_query_analysis.md, then non_query_issues.md.

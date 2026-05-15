@@ -85,6 +85,28 @@ function mcpResultToText(result: Awaited<ReturnType<Client['callTool']>>): strin
         .join('\n');
 }
 
+function makeLineLogger(prefix: string) {
+    let buf = '';
+    return {
+        write(chunk: string) {
+            if (!chunk) return;
+            buf += chunk;
+            let nl = buf.indexOf('\n');
+            while (nl !== -1) {
+                const line = buf.slice(0, nl).replace(/\s+$/, '');
+                if (line) log.info(`${prefix} ${line}`);
+                buf = buf.slice(nl + 1);
+                nl = buf.indexOf('\n');
+            }
+        },
+        close() {
+            const tail = buf.replace(/\s+$/, '');
+            if (tail) log.info(`${prefix} ${tail}`);
+            buf = '';
+        },
+    };
+}
+
 export type AgentAttachment = { name: string; text: string };
 
 export async function runMcpAgent(opts: {
@@ -100,7 +122,7 @@ export async function runMcpAgent(opts: {
     maxSteps?: number;
     toolTimeoutMs?: number;
 }) {
-    const { openai, model, prompt, attachments, clients, allowedTools, system, reasoning, maxSteps = 12, toolTimeoutMs = 5 * 60 * 1000 } = opts;
+    const { openai, model, prompt, attachments, clients, allowedTools, system, reasoning, maxSteps = 30, toolTimeoutMs = 5 * 60 * 1000 } = opts;
     const { tools, dispatch } = await buildToolRegistry(clients, allowedTools);
 
     const clientCount = Object.keys(clients ?? {}).length;
@@ -124,7 +146,12 @@ export async function runMcpAgent(opts: {
 
     for (let step = 0; step < maxSteps; step++) {
         const stepStartedAt = Date.now();
-        const response = await openai.responses.create({
+        const stepLabel = `step ${step + 1}/${maxSteps}`;
+
+        const reasoningLogger = makeLineLogger(`  💭 [${stepLabel} reasoning]`);
+        const outputLogger = makeLineLogger(`  💬 [${stepLabel} output]`);
+
+        const stream = openai.responses.stream({
             model,
             instructions: system,
             input,
@@ -133,29 +160,67 @@ export async function runMcpAgent(opts: {
             reasoning: reasoning as OpenAI.Responses.ResponseCreateParams['reasoning'],
         });
 
+        try {
+            for await (const event of stream) {
+                switch (event.type) {
+                    case 'response.created':
+                        log.info(`▶ Agent ${stepLabel} streaming started`);
+                        break;
+                    case 'response.reasoning_summary_text.delta':
+                    case 'response.reasoning_text.delta':
+                        reasoningLogger.write(event.delta);
+                        break;
+                    case 'response.reasoning_summary_text.done':
+                    case 'response.reasoning_text.done':
+                        reasoningLogger.close();
+                        break;
+                    case 'response.output_text.delta':
+                        outputLogger.write(event.delta);
+                        break;
+                    case 'response.output_text.done':
+                        outputLogger.close();
+                        break;
+                    case 'response.output_item.added':
+                        if (event.item.type === 'function_call') {
+                            log.info(`  🛠  [${stepLabel}] tool call starting: ${event.item.name}`);
+                        }
+                        break;
+                    case 'response.failed':
+                        log.warning(`Agent ${stepLabel} stream reported failure`, { error: event.response.error });
+                        break;
+                    default:
+                        break;
+                }
+            }
+        } finally {
+            reasoningLogger.close();
+            outputLogger.close();
+        }
+
+        const response = (await stream.finalResponse()) as unknown as OpenAI.Responses.Response;
+
         const usage = extractUsage(response);
         totals.input += usage.input;
         totals.output += usage.output;
         totals.reasoning += usage.reasoning;
         totals.total += usage.total;
 
-        const stepMs = Date.now() - stepStartedAt;
-        log.info(
-            `Agent step ${step + 1}/${maxSteps} done in ${stepMs}ms — tokens: `
-            + `in=${usage.input}, out=${usage.output}`
-            + (usage.reasoning ? `, reasoning=${usage.reasoning}` : '')
-            + `, total=${usage.total}`,
-        );
-
-        // Append every output item from this turn back into input so the
-        // model sees its own previous output (and tool calls) on the next call.
-        for (const item of response.output) {
-            input.push(item as ResponseInputItem);
-        }
-
         const functionCalls = response.output.filter(
             (item): item is OpenAI.Responses.ResponseFunctionToolCall => item.type === 'function_call',
         );
+
+        const stepMs = Date.now() - stepStartedAt;
+        log.info(
+            `Agent ${stepLabel} done in ${stepMs}ms — tokens: `
+            + `in=${usage.input}, out=${usage.output}`
+            + (usage.reasoning ? `, reasoning=${usage.reasoning}` : '')
+            + `, total=${usage.total}`
+            + (functionCalls.length ? `, tool_calls=${functionCalls.length}` : ''),
+        );
+
+        for (const item of response.output) {
+            input.push(item as ResponseInputItem);
+        }
 
         if (functionCalls.length === 0) {
             const agentMs = Date.now() - agentStartedAt;
