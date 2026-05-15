@@ -24,6 +24,8 @@ export type NotionSnapshot = {
 };
 
 const FETCH_TOOL_NAME = 'notion-fetch';
+const SEARCH_TOOL_NAME = 'notion-search';
+const ALLOWED_TOOLS = [FETCH_TOOL_NAME, SEARCH_TOOL_NAME];
 const MAX_STEPS = 30;
 const TOOL_TIMEOUT_MS = 2 * 60 * 1000;
 
@@ -34,23 +36,30 @@ no commentary, no markdown.
 
 Database to fetch: \`${databaseId}\`.
 
-Tool you may call (and ONLY this tool):
-  • ${FETCH_TOOL_NAME} — fetch a Notion URL or ID.
+Tools you may call (and ONLY these tools):
+  • ${FETCH_TOOL_NAME} — fetch a Notion URL or ID (database, data source, or page).
+  • ${SEARCH_TOOL_NAME} — list/search entries inside a Notion data source. Use this
+    to enumerate rows once you know the data source UUID. Supports pagination
+    via a cursor in the response.
 
 Procedure:
   1. Call ${FETCH_TOOL_NAME} with the database ID. The response contains a
-     \`<data-source url="collection://<uuid>">\` tag near the top and a paged
-     list of entries with their property values.
+     \`<data-source url="collection://<uuid>">\` tag near the top describing
+     the data source backing this database.
   2. Capture the data source UUID from that tag (everything after
      \`collection://\`).
-  3. If the response indicates more pages exist (e.g. a "next page" cursor,
-     a "load more" link, or fewer entries than the database is known to
-     contain), call ${FETCH_TOOL_NAME} again with the appropriate continuation
-     reference. Repeat until every entry has been listed.
-  4. For each entry, extract: page id, page URL, title, Collection,
+  3. Call ${SEARCH_TOOL_NAME} scoped to that data source UUID to list its
+     entries. If the response includes a continuation cursor (e.g.
+     \`next_cursor\`, \`has_more\`, or a "load more" reference), call
+     ${SEARCH_TOOL_NAME} again with the cursor until every entry has been
+     listed.
+  4. For any entry whose property values are not fully visible in the search
+     results, call ${FETCH_TOOL_NAME} on that page's ID/URL to read the
+     missing fields.
+  5. For each entry, extract: page id, page URL, title, Collection,
      Query Hashes (multi-select — emit ALL hashes), Status, Priority,
      Action Type, First Seen, Last Seen, GitHub Issue.
-  5. When fully enumerated, output a SINGLE JSON object and nothing else.
+  6. When fully enumerated, output a SINGLE JSON object and nothing else.
 
 Output schema (strict — emit exactly this shape, no extra keys, no prose):
 
@@ -78,7 +87,7 @@ Rules:
     null, not "N/A".
   • query_hashes is always an array; use [] when there are no hashes.
   • Do NOT fabricate entries. Only emit rows that exist in the database.
-  • Do NOT call any other tool.
+  • Do NOT call any tool other than ${FETCH_TOOL_NAME} and ${SEARCH_TOOL_NAME}.
   • Once you have enumerated every entry, your final assistant message must
     be exactly one JSON object that matches the schema above — no fences,
     no extra text before or after.`;
@@ -98,7 +107,7 @@ export async function fetchNotionEntries(opts: {
         maxSteps: MAX_STEPS,
         toolTimeoutMs: TOOL_TIMEOUT_MS,
         clients: { notion: notionMcp },
-        allowedTools: { notion: [FETCH_TOOL_NAME] },
+        allowedTools: { notion: ALLOWED_TOOLS },
         system: buildSystemPrompt(databaseId),
         prompt: `Enumerate every row of database \`${databaseId}\` and emit the JSON object described in your instructions.`,
     });
