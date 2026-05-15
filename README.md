@@ -30,7 +30,7 @@ Atlas logs ──► your JS filter ──► group + stats ──► analysis a
 |---|---|---|
 | Organization ID | yes | Your Atlas organization ID. In Atlas, click your account → Organizations. |
 | Project ID | yes | The Atlas project ID — shown once you select an organization. |
-| Public key / Private key | yes | An Atlas API key pair with at least read access to logs. Create one under Organization Settings → Access Manager. Both are stored as secrets. |
+| Public key / Private key | yes | An Atlas API key pair with at read access to logs. Create one under Organization Settings → Access Manager. Both are stored as secrets. |
 | Nodes | yes | The Atlas node hostnames you want to pull logs from (e.g. `atlas-abc-shard-00-00.xyz.mongodb.net`). One entry per node. |
 | Hours | no | How many hours of history to pull. Default 1. For a daily schedule, use 24. |
 | Filter function | yes | A JavaScript function that receives each parsed log line. Return the line (or any truthy value) to keep it, return falsy to drop it. Use it to skip internal traffic before it hits the analyzer. |
