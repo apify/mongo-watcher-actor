@@ -60,24 +60,9 @@
             "description": "A dump of all existing indexes on the cluster (output of `db.getCollectionNames().map(c => ({ name: c, indexes: db[c].getIndexes() }))`)",
             "editor": "json"
         },
-        "notionMcpConnector": {
-            "title": "Notion MCP Connector",
-            "description": "Connector to a Notion MCP Server. The findings state is stored on a single Notion page identified by Notion Page ID.",
-            "type": "string",
-            "resourceType": "mcpConnector",
-            "mcpServers": [
-                { "url": "*notion*" }
-            ]
-        },
-        "notionPageId": {
-            "title": "Notion Page ID",
-            "description": "The ID of the Notion page that holds the findings state. The actor rewrites this page on every run; do not edit it by hand.",
-            "type": "string",
-            "editor": "textfield"
-        },
         "githubMcpConnector": {
             "title": "GitHub MCP Connector",
-            "description": "Connect to GitHub MCP server to allow the Actor to create new tickets automatically when new Slow Query is found.",
+            "description": "Connector to a GitHub MCP Server. The findings state is stored as GitHub issues in the target repository, labelled with `slow-query`. The actor lists, creates, updates, and auto-closes those issues on every run.",
             "type": "string",
             "resourceType": "mcpConnector",
             "mcpServers": [
@@ -86,10 +71,10 @@
         },
         "githubRepository": {
             "title": "GitHub Repository",
-            "description": "Provide a name of the repository where new issues will be created",
+            "description": "Target repository in `<owner>/<repo>` format. Slow-query findings are tracked as labelled issues in this repo.",
             "type": "string",
             "editor": "textfield"
         }
     },
-    "required": ["organization_id", "project_id", "public_key", "private_key", "nodes", "indexes", "notionMcpConnector", "notionPageId", "githubMcpConnector", "githubRepository"]
+    "required": ["organization_id", "project_id", "public_key", "private_key", "nodes", "indexes", "githubMcpConnector", "githubRepository"]
 }
