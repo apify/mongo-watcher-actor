@@ -117,12 +117,39 @@ export async function fetchNotionEntries(opts: {
     return parsed;
 }
 
-function parseSnapshot(text: string): NotionSnapshot {
-    // Defensive: the model sometimes wraps JSON in a ```json fence despite the prompt forbidding it.
+function extractJsonObject(text: string): string {
+    // The model sometimes wraps JSON in a ```json fence or adds a prose prefix
+    // despite the prompt forbidding it. Pull out the first balanced {...} block.
     const trimmed = text.trim();
-    const stripped = trimmed.startsWith('```')
-        ? trimmed.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')
-        : trimmed;
+    let candidate = trimmed;
+    if (trimmed.startsWith('```')) {
+        const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (fenceMatch) candidate = fenceMatch[1].trim();
+    }
+
+    const start = candidate.indexOf('{');
+    if (start === -1) return candidate;
+
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = start; i < candidate.length; i++) {
+        const ch = candidate[i];
+        if (escape) { escape = false; continue; }
+        if (ch === '\\' && inString) { escape = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+            depth--;
+            if (depth === 0) return candidate.slice(start, i + 1);
+        }
+    }
+    return candidate.slice(start);
+}
+
+function parseSnapshot(text: string): NotionSnapshot {
+    const stripped = extractJsonObject(text);
 
     let raw: unknown;
     try {

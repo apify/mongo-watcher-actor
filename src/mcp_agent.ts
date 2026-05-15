@@ -150,6 +150,10 @@ export async function runMcpAgent(opts: {
 
         const reasoningLogger = makeLineLogger(`  💭 [${stepLabel} reasoning]`);
         const outputLogger = makeLineLogger(`  💬 [${stepLabel} output]`);
+        // Some providers (e.g. OpenRouter) stream output_text deltas but leave
+        // `response.output_text` empty after `finalResponse()`. Capture the
+        // deltas ourselves so the caller always gets the assistant's text.
+        const streamedChunks: string[] = [];
 
         const stream = openai.responses.stream({
             model,
@@ -176,6 +180,7 @@ export async function runMcpAgent(opts: {
                         break;
                     case 'response.output_text.delta':
                         outputLogger.write(event.delta);
+                        streamedChunks.push(event.delta);
                         break;
                     case 'response.output_text.done':
                         outputLogger.close();
@@ -230,7 +235,8 @@ export async function runMcpAgent(opts: {
                 + (totals.reasoning ? `, reasoning=${totals.reasoning}` : '')
                 + `, total=${totals.total}`,
             );
-            return { text: response.output_text ?? '', input };
+            const finalText = response.output_text || streamedChunks.join('');
+            return { text: finalText, input };
         }
 
         // Execute every tool call this turn (model may issue several in parallel)
